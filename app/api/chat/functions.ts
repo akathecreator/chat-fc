@@ -1,119 +1,128 @@
-import { CompletionCreateParams } from "openai/resources/chat/index";
+import { ChatCompletionCreateParams } from "openai/resources/chat/index";
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  updateDoc,
+} from "firebase/firestore";
+import {
+  giveStoragePermission,
+  getShelfLocation,
+  shootMissedAllocation,
+} from "./warehouse";
+import {
+  findNewListingsToday,
+  findOrdersHealthToday,
+  findNumberOfTransactions,
+} from "./orders";
 
-export const functions: CompletionCreateParams.Function[] = [
+export const functions: ChatCompletionCreateParams.Function[] = [
   {
-    name: "get_top_stories",
-    description:
-      "Get the top stories from Hacker News. Also returns the Hacker News URL to each story.",
+    name: "open_storage_permission",
+    description: "Open permission for users to request storage in r2s",
     parameters: {
       type: "object",
       properties: {
-        limit: {
-          type: "number",
-          description: "The number of stories to return. Defaults to 10.",
+        user_email: {
+          type: "string",
+          description: "Email of user requesting",
         },
       },
-      required: [],
+      required: ["user_email"],
     },
   },
   {
-    name: "get_story",
-    description:
-      "Get a story from Hacker News. Also returns the Hacker News URL to the story.",
+    name: "request_location_in_warehouse",
+    description: "Finding the location of item in the warehouse",
     parameters: {
       type: "object",
       properties: {
-        id: {
-          type: "number",
-          description: "The ID of the story",
+        order_ref: {
+          type: "string",
+          description: "order id or wms_ref of order",
         },
       },
-      required: ["id"],
+      required: ["order_ref"],
     },
   },
   {
-    name: "get_story_with_comments",
+    name: "allocate_space_in_warehouse",
     description:
-      "Get a story from Hacker News with comments.  Also returns the Hacker News URL to the story and each comment.",
+      "Unable to print warehouse label or it appears loading when printing",
     parameters: {
       type: "object",
       properties: {
-        id: {
-          type: "number",
-          description: "The ID of the story",
+        order_ref: {
+          type: "string",
+          description: "order id",
         },
       },
-      required: ["id"],
+      required: ["order_ref"],
     },
   },
   {
-    name: "summarize_top_story",
+    name: "find_new_listings",
     description:
-      "Summarize the top story from Hacker News, including both the story and its comments. Also returns the Hacker News URL to the story and each comment.",
+      "Find total listing depending on the firestore timestamp deduced from users' input for example if user says 7 days ago if today was 2024-04-19T17:00:00.000Z then you should pass 2024-04-12T17:00:00.000Z as string timestamp. GMV value always in Thai Baht",
     parameters: {
       type: "object",
-      properties: {},
-      required: [],
+      properties: {
+        timestamp: {
+          type: "string",
+          description:
+            "timestamp that deduced from users input passed in a way that can be used in firestore query if hours of the day not mentioned use data since midnight",
+        },
+      },
+    },
+  },
+  {
+    name: "find_numbers_of_transactions",
+    description:
+      "If users use the word order means transacted order. Find total sold orders or transactions depending on the firestore timestamp deduced from users' input for example if user says 7 days ago if today was 2024-04-19T17:00:00.000Z then you should pass 2024-04-12T17:00:00.000Z as string timestamp GMV value always in Thai Baht",
+    parameters: {
+      type: "object",
+      properties: {
+        timestamp: {
+          type: "string",
+          description:
+            "timestamp that deduced from users input passed in a way that can be used in firestore query if hours of the day not mentioned use data since midnight",
+        },
+      },
     },
   },
 ];
 
-async function get_top_stories(limit: number = 10) {
-  const response = await fetch(
-    "https://hacker-news.firebaseio.com/v0/topstories.json",
-  );
-  const ids = await response.json();
-  const stories = await Promise.all(
-    ids.slice(0, limit).map((id: number) => get_story(id)),
-  );
-  return stories;
-}
-
-async function get_story(id: number) {
-  const response = await fetch(
-    `https://hacker-news.firebaseio.com/v0/item/${id}.json`,
-  );
-  const data = await response.json();
-  return {
-    ...data,
-    hnUrl: `https://news.ycombinator.com/item?id=${id}`,
-  };
-}
-
-async function get_story_with_comments(id: number) {
-  const response = await fetch(
-    `https://hacker-news.firebaseio.com/v0/item/${id}.json`,
-  );
-  const data = await response.json();
-  const comments = await Promise.all(
-    data.kids.slice(0, 10).map((id: number) => get_story(id)),
-  );
-  return {
-    ...data,
-    hnUrl: `https://news.ycombinator.com/item?id=${id}`,
-    comments: comments.map((comment: any) => ({
-      ...comment,
-      hnUrl: `https://news.ycombinator.com/item?id=${comment.id}`,
-    })),
-  };
-}
-
-async function summarize_top_story() {
-  const topStory = await get_top_stories(1);
-  return await get_story_with_comments(topStory[0].id);
-}
-
-export async function runFunction(name: string, args: any) {
+export async function runFunction(name: string, args: any, db: object) {
+  let result; // Declare result variable to hold the function return value
+  let message;
   switch (name) {
-    case "get_top_stories":
-      return await get_top_stories();
-    case "get_story":
-      return await get_story(args["id"]);
-    case "get_story_with_comments":
-      return await get_story_with_comments(args["id"]);
-    case "summarize_top_story":
-      return await summarize_top_story();
+    case "open_storage_permission":
+      const message = await giveStoragePermission(db, args.user_email);
+      return message;
+    case "request_location_in_warehouse":
+      result = await getShelfLocation(db, args.order_ref);
+      break;
+
+    case "allocate_space_in_warehouse":
+      // Assuming shootMissedAllocation is the correct function for this operation
+      result = await shootMissedAllocation(db, args.order_ref);
+      break;
+
+    case "find_new_listings":
+      // Assuming findNewListingsToday takes a timestamp argument
+      result = await findNewListingsToday(db, args.timestamp);
+      break;
+
+    case "find_numbers_of_transactions":
+      // Assuming findNumberOfTransactions takes a timestamp argument
+      result = await findNumberOfTransactions(db, args.timestamp);
+      break;
+
     default:
-      return null;
+      result = JSON.stringify({ message: "Function not found" });
+      break;
   }
+  return result;
 }

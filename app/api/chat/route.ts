@@ -6,13 +6,26 @@ import {
   StreamingTextResponse,
 } from "ai";
 import { functions, runFunction } from "./functions";
+// Import the functions you need from the SDKs you need
+import { initializeApp, getApps } from "firebase/app";
+import { getFirestore, collection, query, limit, getDocs } from "firebase/firestore";
 
-// Create an OpenAI API client (that's edge friendly!)
+const firebaseConfig = {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+};
+
+// Initialize Firebase
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-export const runtime = "edge";
+// export const runtime = "edge"; 
 
 export async function POST(req: Request) {
   if (
@@ -43,7 +56,10 @@ export async function POST(req: Request) {
   }
 
   const { messages } = await req.json();
-
+  // let firebase_app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+  const app = initializeApp(firebaseConfig)
+  const db = getFirestore(app)
+ 
   // check if the conversation requires a function call to be made
   const initialResponse = await openai.chat.completions.create({
     model: "gpt-3.5-turbo-0613",
@@ -58,7 +74,7 @@ export async function POST(req: Request) {
       { name, arguments: args },
       createFunctionCallMessages,
     ) => {
-      const result = await runFunction(name, args);
+      const result = await runFunction(name, args, db);
       const newMessages = createFunctionCallMessages(result);
       return openai.chat.completions.create({
         model: "gpt-3.5-turbo-0613",
